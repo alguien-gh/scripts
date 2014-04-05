@@ -1,5 +1,18 @@
 #!/bin/python
 
+"""
+Escrito por: Alguien
+Blog: http://blog.alguien.at/
+Fecha: 26/01/2014
+
+Historial de cambios:
+#####################
+
+26/01/2014    Primer commit
+05/04/2014    Agregar OUI F86180 reportado por Miguel Mallma
+
+"""
+
 import sys
 
 zteOUI = {
@@ -8,7 +21,8 @@ zteOUI = {
     'F8ED80': 'A0EC80',
     'F8038E': 'DC028E',
     'F8C346': 'E4C146',
-    'F83F61': 'F43E61'
+    'F83F61': 'F43E61',
+    'F86180': '146080'    # Aporte por Miguel Mallma
 }
 
 

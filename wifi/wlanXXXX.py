@@ -10,6 +10,7 @@ Historial de cambios:
 
 26/01/2014    Primer commit
 05/04/2014    Agregar OUI F86180 reportado por Miguel Mallma
+07/04/2014    Agregar OUI F87F35 reportado por @francis2077
 
 """
 
@@ -22,7 +23,8 @@ zteOUI = {
     'F8038E': 'DC028E',
     'F8C346': 'E4C146',
     'F83F61': 'F43E61',
-    'F86180': '146080'    # Aporte por Miguel Mallma
+    'F86180': '146080',   # Aporte por Miguel Mallma
+    'F87F35': 'CC7B35'    # Aporte por @francis2077
 }
 
 

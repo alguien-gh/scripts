@@ -11,7 +11,7 @@ Historial de cambios:
 26/01/2014    Primer commit
 05/04/2014    Agregar OUI F86180 reportado por Miguel Mallma
 07/04/2014    Agregar OUI F87F35 reportado por @francis2077
-
+29/04/2014    Soporte para OUI F8C346 de la marca Observa
 """
 
 import sys
@@ -21,11 +21,22 @@ zteOUI = {
     'F8E1CF': '34E0CF',
     'F8ED80': 'A0EC80',
     'F8038E': 'DC028E',
-    'F8C346': 'E4C146',
     'F83F61': 'F43E61',
     'F86180': '146080',   # Aporte por Miguel Mallma
     'F87F35': 'CC7B35'    # Aporte por @francis2077
 }
+
+observaOUI = {
+    'F8C346': 'E4C146'    # Aporte anonimo
+}
+
+
+def get_prefix(oui=""):
+    if oui in zteOUI.keys():
+        return "Z%s" % (zteOUI[oui])
+    if oui in observaOUI.keys():
+        return "O%s" % (observaOUI[oui])
+    return None
 
 
 def main():
@@ -44,17 +55,15 @@ def main():
     oui = "".join(partes)
     oui = oui[0:6]
 
-    oui2 = None
-    if oui in zteOUI.keys():
-        oui2 = zteOUI[oui]
-    else:
+    prefix = get_prefix(oui)
+    if prefix is None:
         print "Lo siento, no conosco ese OUI: %s" % oui
         exit(1)
 
     final = hex(int("".join(partes[3:]), 16) - 9).upper()[2:]
     final = "0" * (6 - len(final)) + final
 
-    defpwd = "Z%s%s" % (oui2, final)
+    defpwd = "%s%s" % (prefix, final)
     print "La clave WPA por defecto es: %s" % defpwd
     print "Terminado };]"
 

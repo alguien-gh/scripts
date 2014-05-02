@@ -5,6 +5,7 @@ import httplib
 import re
 import urlparse
 import time
+import socket
 
 
 CONFIG = {
@@ -94,7 +95,12 @@ def main():
     mensaje("[+] Se encontraron %d subdominios" % len(dominios), 1, NORM)
     mensaje("[+] Resultados: \n", 1, NORM)
     for dominio in dominios:
-        mensaje(dominio, 0, NORM)
+        try:
+            _, _, ips = socket.gethostbyname_ex(dominio)
+            for ip in ips:
+                mensaje("%s\t%s" % (dominio, ip), 0, NORM)
+        except:
+            mensaje("%s\t-" % (dominio), 0, ERRO)
     return 0
 
 

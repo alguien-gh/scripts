@@ -47,7 +47,8 @@ def buscar(dork="site:example.com", first=1):
     html = resp.read()
     conn.close()
 
-    patron = re.compile('<div class="sb_tlst"><h3><a href="([^"]*)"')
+    #patron = re.compile('<div class="sb_tlst"><h3><a href="([^"]*)"')
+    patron = re.compile('<h2><a href="([^"]*)" h="[^"]*">[^<]*</a></h2>')
     urls = patron.findall(html)
 
     return urls

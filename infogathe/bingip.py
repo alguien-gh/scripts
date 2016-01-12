@@ -12,7 +12,7 @@ CONFIG = {
         "port": 80,
         "paginas": 10,
         "delay": 3,
-        "agent": "Mozilla/5.0 (X11; Linux x86_64; rv:26.0) Gecko/20100101 Firefox/26.0",
+        "agent": "Mozilla/5.0",
         "verbose": 3
     }
 NORM = "\033[1;92m"
@@ -47,8 +47,7 @@ def buscar(dork="site:example.com", first=1):
     html = resp.read()
     conn.close()
 
-    #patron = re.compile('<div class="sb_tlst"><h3><a href="([^"]*)"')
-    patron = re.compile('<h2><a href="([^"]*)" h="[^"]*">[^<]*</a></h2>')
+    patron = re.compile('<h2><a href="([^"]*)" h="')
     urls = patron.findall(html)
 
     return urls

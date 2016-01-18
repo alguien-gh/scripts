@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-
+'''
+License: Free as in free beer
+Author: Alguien (@alguien_tw) | alguien.site
+Support: devnull@alguien.site
+'''
 from scapy.all import *
 from random import random
 import argparse
@@ -137,13 +141,14 @@ def traceroute(ip, port):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Discover a net range using traceroute')
+        description='A tool for network range discovery using traceroute.',
+        epilog='Author: Alguien (@alguien_tw) | alguien.site')
     parser.add_argument('ip', metavar='IP', type=str,
         help='Any IP address in the target network')
     parser.add_argument('--mask', type=int, default=29,
-        help='Initial net mask')
+        help='Initial netmask')
     parser.add_argument('--max-mask', type=int,
-        help='Maximum net mask to try')
+        help='Maximum netmask to try')
     parser.add_argument('--timeout', type=int,
         help='Timeout for portscan and traceroute')
     parser.add_argument('--min-ttl', type=int,
@@ -153,7 +158,7 @@ def parse_args():
     parser.add_argument('--deep', type=int,
         help='Maximum deep for finding a common hop')
     parser.add_argument('--no-scan', action='store_true', default=False,
-        help='Don\'t perform portscan before traceroute')
+        help='Don\'t perform portscan')
     return parser.parse_args()
 
 

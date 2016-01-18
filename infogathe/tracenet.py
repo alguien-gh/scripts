@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from scapy.all import *
+from random import random
 import argparse
 
 
@@ -13,7 +14,8 @@ CONFIG = {
     'min_ttl': 1,
     'max_ttl': 20,
     'max_deep': 3,
-    'max_mask': 22
+    'max_mask': 22,
+    'scan': True
 }
 
 
@@ -41,6 +43,15 @@ def comp_subnet(ip, mask):
     net = to_net(ip, mask)
     numb = to_numb(net)
     numb = numb ^ (1 << (32 - mask))
+    return to_ip(numb)
+
+
+def random_ip(ip, mask):
+    net = to_net(ip, mask)
+    numb = to_numb(net)
+    rand = int(random() * 10 ** 10)
+    rand = rand & ~((~0) << (32 - mask))
+    numb = numb | rand
     return to_ip(numb)
 
 
@@ -114,8 +125,9 @@ def traceroute(ip, port):
     for (snd, rcv) in ans:
         path.append({'ttl': snd.ttl, 'ip': rcv.src})
     if len(path) > 0:
-        path = sorted(path, key=lambda x: x['ttl'])
+        path = sorted(path, key=lambda x: x['ttl'])    # sort by TTL
         try:
+            # remove repeated responses
             idx = [x['ip'] for x in path].index(ip)
             path = path[:idx + 1]
         except:
@@ -124,21 +136,40 @@ def traceroute(ip, port):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='')
-    parser.add_argument('ip', metavar='IP', type=str)
-    parser.add_argument('--mask', type=int, default=29)
-    parser.add_argument('--max-mask', type=int)
-    parser.add_argument('--timeout', type=int)
-    parser.add_argument('--min-ttl', type=int)
-    parser.add_argument('--max-ttl', type=int)
-    parser.add_argument('--deep', type=int)
+    parser = argparse.ArgumentParser(
+        description='Discover a net range using traceroute')
+    parser.add_argument('ip', metavar='IP', type=str,
+        help='Any IP address in the target network')
+    parser.add_argument('--mask', type=int, default=29,
+        help='Initial net mask')
+    parser.add_argument('--max-mask', type=int,
+        help='Maximum net mask to try')
+    parser.add_argument('--timeout', type=int,
+        help='Timeout for portscan and traceroute')
+    parser.add_argument('--min-ttl', type=int,
+        help='Minimum TTL for traceroute')
+    parser.add_argument('--max-ttl', type=int,
+        help='Maximum TTL for traceroute')
+    parser.add_argument('--deep', type=int,
+        help='Maximum deep for finding a common hop')
+    parser.add_argument('--no-scan', action='store_true', default=False,
+        help='Don\'t perform portscan before traceroute')
     return parser.parse_args()
+
+
+def print_route(dest, path):
+    print "[*] Route to %s:" % (dest['ip'])
+    for hop in path:
+        print "\t%3d: %s" % (hop['ttl'], hop['ip'])
 
 
 def main():
     global CONFIG
+
+    # parse arguments
     args = parse_args()
 
+    # update global config
     if args.max_mask is not None:
         CONFIG['max_mask'] = args.max_mask
     if args.timeout is not None:
@@ -149,64 +180,78 @@ def main():
         CONFIG['max_ttl'] = args.max_ttl
     if args.deep is not None:
         CONFIG['max_deep'] = args.deep
+    if args.no_scan:
+        CONFIG['scan'] = False
 
     ip = args.ip
     mask = args.mask
     max_mask = CONFIG['max_mask']
-
+    scan = CONFIG['scan']
     net = to_net(ip, mask)
-    print "Escaneando subnet %s/%d..." % (net, mask)
 
     hosts = []
-    for port in TOP_PORTS:
-        print "Escaneando puerto %d" % (port)
-        hosts += portscan('%s/%d' % (net, mask), port)
-        if len(hosts) > 0:
-            break
-
-    if len(hosts) == 0:
-        print "No hay suficientes resultados en el escaneo"
-        exit()
-
-    print "Resultados: "
-    for host in hosts:
-        print host
+    if scan:
+        print "[*] Scanning network %s/%d..." % (net, mask)
+        for port in TOP_PORTS:
+            print "\t> Trying with port %d..." % (port)
+            hosts += portscan('%s/%d' % (net, mask), port)
+            if len(hosts) > 0:
+                break
+    if len(hosts) > 0:
+        print "[*] Scan results:"
+        for host in hosts:
+            print "\t> %s:%d" % (host['ip'], host['port'])
+    else:
+        host = {'ip': random_ip(net, mask), 'port': 80}
+        hosts.append(host)
+        print "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
 
     dest1 = hosts[0]
     path1 = traceroute(dest1['ip'], dest1['port'])
+    if len(path1) == 0:
+        print "[-] Error. I can't trace the route to %s" % (dest1['ip'])
+        exit(-1)
+    print_route(dest1, path1)
 
     while mask > max_mask:
         net2 = comp_subnet(net, mask)
-        print "Escaneando subnet %s/%s..." % (net2, mask)
-
         hosts = []
-        for port in TOP_PORTS:
-            print "Escaneando puerto %d" % (port)
-            hosts += portscan('%s/%s' % (net2, mask), port)
-            if len(hosts) > 0:
-                break
-
-        if len(hosts) == 0:
-            print "No hay suficientes resultados en el escaneo"
-            break
-
-        print "Resultados: "
-        for host in hosts:
-            print host
+        if scan:
+            print "[*] Scanning network %s/%d..." % (net2, mask)
+            for port in TOP_PORTS:
+                print "\t> Trying with port %d..." % (port)
+                hosts += portscan('%s/%d' % (net2, mask), port)
+                if len(hosts) > 0:
+                    break
+        if len(hosts) > 0:
+            print "[*] Scan results:"
+            for host in hosts:
+                print "\t> %s:%d" % (host['ip'], host['port'])
+        else:
+            host = {'ip': random_ip(net2, mask), 'port': 80}
+            hosts.append(host)
+            print "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
 
         dest2 = hosts[0]
         path2 = traceroute(dest2['ip'], dest2['port'])
+        if len(path2) == 0:
+            print "[-] Error. I can't trace the route to %s" % (dest2['ip'])
+            break
+        print_route(dest2, path2)
 
         gateway = find_gateway(path1, path2)
         if gateway is None:
-            print "No se encontro un gateway comun"
+            print "[*] There is not a common hop for %s and %s" % (
+                dest1['ip'], dest2['ip'])
             break
 
-        print "Gateway: %s (ttl: %d)" % (gateway['ip'], gateway['ttl'])
+        print "[+] Common hop found: %s (ttl: %d)" % (
+            gateway['ip'], gateway['ttl'])
+
         mask -= 1
         net = to_net(net, mask)
 
-    print "Network: %s/%d" % (to_net(ip, mask), mask)
+    print "[+] Network range: %s/%d" % (net, mask)
 
 
 if __name__ == '__main__':

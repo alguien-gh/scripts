@@ -6,8 +6,9 @@ Support: devnull@alguien.site
 '''
 from scapy.all import *
 from random import random
+import socket
+import struct
 import argparse
-
 
 # Top 10 TCP ports from nmap-services
 TOP_PORTS = [80, 23, 443, 21, 22, 25, 3389, 110, 445, 139]
@@ -19,44 +20,48 @@ CONFIG = {
     'max_ttl': 20,
     'max_deep': 3,
     'max_mask': 22,
-    'scan': True
+    'mask': 29,
+    'scan': True,
+    'target': '0.0.0.0',
+    'verb': 3
 }
 
 
-def to_numb(ip):
-    ip = [int(x) for x in ip.split('.')]
-    return sum([ip[3 - n] * (256 ** n) for n in range(0, 4)])
+def unsort_list(lst):
+    return sorted(lst, key=lambda x: random())
 
 
-def to_ip(numb):
-    ip = []
-    for n in range(0, 4):
-        div = 256 ** (3 - n)
-        ip.append(str(numb / div))
-        numb = numb % div
-    return '.'.join(ip)
+def random_ip(base_ip, mask):
+    return Net('%s/%d' % (base_ip, mask)).choice()
+
+
+def inet_aton(str_ip):
+    return struct.unpack('!L', socket.inet_aton(str_ip))[0]
+
+
+def inet_ntoa(lng_ip):
+    return socket.inet_ntoa(struct.pack('!L', lng_ip))
 
 
 def to_net(ip, mask):
-    numb = to_numb(ip)
-    net = numb & ((~0) << (32 - mask))
-    return to_ip(net)
+    net = inet_aton(ip) & ((~0) << (32 - mask))
+    return inet_ntoa(net)
 
 
 def comp_subnet(ip, mask):
     net = to_net(ip, mask)
-    numb = to_numb(net)
-    numb = numb ^ (1 << (32 - mask))
-    return to_ip(numb)
+    numb = inet_aton(net) ^ (1 << (32 - mask))
+    return inet_ntoa(numb)
 
 
-def random_ip(ip, mask):
-    net = to_net(ip, mask)
-    numb = to_numb(net)
-    rand = int(random() * 10 ** 10)
-    rand = rand & ~((~0) << (32 - mask))
-    numb = numb | rand
-    return to_ip(numb)
+def div_net(net, mask, limit):
+    net = to_net(net, mask)
+    if mask < limit:
+        mask += 1
+        net2 = comp_subnet(net, mask)
+        return div_net(net, mask, limit) + div_net(net2, mask, limit)
+    else:
+        return [{'ip': net, 'mask': mask}]
 
 
 def find_gateway(path1, path2):
@@ -105,74 +110,45 @@ def find_gateway(path1, path2):
     return major
 
 
-def portscan(ip, port):
-    timeout = CONFIG['timeout']
+def port_scan(target_ip, dest_port):
+    pkt = IP(dst=target_ip) / TCP(sport=RandShort(), dport=dest_port, flags="S")
+    ans, _ = sr(pkt, timeout=CONFIG['timeout'], verbose=False)
     hosts = []
-    pkt = IP(dst=ip) / TCP(sport=RandShort(), dport=port, flags="S")
-    ans, unans = sr(pkt, timeout=timeout, verbose=False)
     for (snd, rcv) in ans:
-        if TCP in rcv:
-            flags = rcv[TCP].flags
-            if flags & 0x02 and flags & 0x10:    # flags: 0x02 SYN / 0x10 ACK
-                hosts.append({'ip': snd.dst, 'port': snd[TCP].dport})
+        if TCP in rcv and rcv[TCP].flags & 0x02 and rcv[TCP].flags & 0x10:  # flags: 0x02 SYN / 0x10 ACK
+            hosts.append({'ip': snd.dst, 'port': snd[TCP].dport})
     return hosts
 
 
-def traceroute(ip, port):
-    timeout = CONFIG['timeout']
-    minttl = CONFIG['min_ttl']
-    maxttl = CONFIG['max_ttl']
+def trace_route(target_ip, dest_port):
+    ans, _ = traceroute(target_ip, dport=dest_port, minttl=CONFIG['min_ttl'], maxttl=CONFIG['max_ttl'],
+                        timeout=CONFIG['timeout'], verbose=False)
     path = []
-    pkt = IP(dst=ip, ttl=(minttl, maxttl), id=RandShort())
-    pkt = pkt / TCP(sport=RandShort(), dport=port, flags='S')
-    ans, unans = sr(pkt, timeout=timeout, verbose=False)
     for (snd, rcv) in ans:
         path.append({'ttl': snd.ttl, 'ip': rcv.src})
     if len(path) > 0:
-        path = sorted(path, key=lambda x: x['ttl'])    # sort by TTL
-        try:
-            # remove repeated responses
-            idx = [x['ip'] for x in path].index(ip)
-            path = path[:idx + 1]
-        except:
-            path = []
+        path = sorted(path, key=lambda x: x['ttl'])  # sort by TTL
+        ip_addrs = [x['ip'] for x in path]
+        if target_ip in ip_addrs:
+            path = path[:ip_addrs.index(target_ip) + 1]  # remove repeated target_ip entries
     return path
 
 
 def parse_args():
+    global CONFIG
     parser = argparse.ArgumentParser(
         description='A tool for network range discovery using traceroute.',
         epilog='Author: Alguien (@alguien_tw) | alguien.site')
-    parser.add_argument('ip', metavar='IP', type=str,
-        help='Any IP address in the target network')
-    parser.add_argument('--mask', type=int, default=29,
-        help='Initial netmask')
-    parser.add_argument('--max-mask', type=int,
-        help='Maximum netmask to try')
-    parser.add_argument('--timeout', type=int,
-        help='Timeout for portscan and traceroute')
-    parser.add_argument('--min-ttl', type=int,
-        help='Minimum TTL for traceroute')
-    parser.add_argument('--max-ttl', type=int,
-        help='Maximum TTL for traceroute')
-    parser.add_argument('--deep', type=int,
-        help='Maximum deep for finding a common hop')
-    parser.add_argument('--no-scan', action='store_true', default=False,
-        help='Don\'t perform portscan')
-    return parser.parse_args()
-
-
-def print_route(dest, path):
-    print "[*] Route to %s:" % (dest['ip'])
-    for hop in path:
-        print "\t%3d: %s" % (hop['ttl'], hop['ip'])
-
-
-def main():
-    global CONFIG
-
-    # parse arguments
-    args = parse_args()
+    parser.add_argument('ip', metavar='IP', type=str, help='Any IP address in the target network')
+    parser.add_argument('--mask', type=int, help='Initial netmask')
+    parser.add_argument('--max-mask', type=int, help='Maximum netmask to try')
+    parser.add_argument('--timeout', type=int, help='Timeout for portscan and traceroute')
+    parser.add_argument('--min-ttl', type=int, help='Minimum TTL for traceroute')
+    parser.add_argument('--max-ttl', type=int, help='Maximum TTL for traceroute')
+    parser.add_argument('--deep', type=int, help='Maximum deep for finding a common hop')
+    parser.add_argument('--no-scan', action='store_true', default=False, help='Don\'t perform portscan')
+    parser.add_argument('--verb', type=int, help='Verbose level [0-3]')
+    args = parser.parse_args()
 
     # update global config
     if args.max_mask is not None:
@@ -185,34 +161,52 @@ def main():
         CONFIG['max_ttl'] = args.max_ttl
     if args.deep is not None:
         CONFIG['max_deep'] = args.deep
+    if args.mask is not None:
+        CONFIG['mask'] = args.mask
     if args.no_scan:
         CONFIG['scan'] = False
+    if args.verb is not None:
+        CONFIG['verb'] = args.verb
+    CONFIG['target'] = args.ip
 
-    ip = args.ip
-    mask = args.mask
-    max_mask = CONFIG['max_mask']
+
+def print_route(dest, path):
+    print "[*] Route to %s:" % (dest['ip'])
+    for hop in path:
+        print "\t%3d: %s" % (hop['ttl'], hop['ip'])
+
+
+def search_hosts(net, mask):
     scan = CONFIG['scan']
-    net = to_net(ip, mask)
-
     hosts = []
+    subnets = div_net(net, mask, 26)
+    subnets = unsort_list(subnets)
     if scan:
         print "[*] Scanning network %s/%d..." % (net, mask)
         for port in TOP_PORTS:
             print "\t> Trying with port %d..." % (port)
-            hosts += portscan('%s/%d' % (net, mask), port)
-            if len(hosts) > 0:
-                break
-    if len(hosts) > 0:
-        print "[*] Scan results:"
-        for host in hosts:
-            print "\t> %s:%d" % (host['ip'], host['port'])
-    else:
-        host = {'ip': random_ip(net, mask), 'port': 80}
-        hosts.append(host)
-        print "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
+            for sub in subnets:
+                hosts = port_scan('%s/%d' % (sub['ip'], sub['mask']), port)
+                if len(hosts) > 0:
+                    return hosts
+    host = {'ip': random_ip(net, mask), 'port': 80}
+    hosts.append(host)
+    print "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
+    return hosts
 
+
+def main():
+    parse_args()
+
+    mask = CONFIG['mask']
+    max_mask = CONFIG['max_mask']
+    target = CONFIG['target']
+
+    net = to_net(target, mask)
+    hosts = unsort_list(search_hosts(net, mask))
     dest1 = hosts[0]
-    path1 = traceroute(dest1['ip'], dest1['port'])
+    print "[*] Host found: %s:%d" % (dest1['ip'], dest1['port'])
+    path1 = trace_route(dest1['ip'], dest1['port'])
     if len(path1) == 0:
         print "[-] Error. I can't trace the route to %s" % (dest1['ip'])
         exit(-1)
@@ -220,25 +214,10 @@ def main():
 
     while mask > max_mask:
         net2 = comp_subnet(net, mask)
-        hosts = []
-        if scan:
-            print "[*] Scanning network %s/%d..." % (net2, mask)
-            for port in TOP_PORTS:
-                print "\t> Trying with port %d..." % (port)
-                hosts += portscan('%s/%d' % (net2, mask), port)
-                if len(hosts) > 0:
-                    break
-        if len(hosts) > 0:
-            print "[*] Scan results:"
-            for host in hosts:
-                print "\t> %s:%d" % (host['ip'], host['port'])
-        else:
-            host = {'ip': random_ip(net2, mask), 'port': 80}
-            hosts.append(host)
-            print "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
-
+        hosts = unsort_list(search_hosts(net2, mask))
         dest2 = hosts[0]
-        path2 = traceroute(dest2['ip'], dest2['port'])
+        print "[*] Host found: %s:%d" % (dest2['ip'], dest2['port'])
+        path2 = trace_route(dest2['ip'], dest2['port'])
         if len(path2) == 0:
             print "[-] Error. I can't trace the route to %s" % (dest2['ip'])
             break
@@ -246,8 +225,7 @@ def main():
 
         gateway = find_gateway(path1, path2)
         if gateway is None:
-            print "[*] There is not a common hop for %s and %s" % (
-                dest1['ip'], dest2['ip'])
+            print "[*] There is not a common hop for %s and %s" % (dest1['ip'], dest2['ip'])
             break
 
         print "[+] Common hop found: %s (ttl: %d)" % (

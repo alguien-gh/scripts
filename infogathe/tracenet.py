@@ -9,6 +9,7 @@ from random import random
 import socket
 import struct
 import argparse
+import os
 
 # Top 10 TCP ports from nmap-services
 TOP_PORTS = [80, 23, 443, 21, 22, 25, 3389, 110, 445, 139]
@@ -25,6 +26,25 @@ CONFIG = {
     'target': '0.0.0.0',
     'verb': 3
 }
+
+COLORS = {
+    'red': '\033[0;31m',
+    'red-bold': '\033[1;31m',
+    'green': '\033[0;32m',
+    'green-bold': '\033[1;32m',
+    'yellow': '\033[0;33m',
+    'yellow-bold': '\033[1;33m',
+    'blue': '\033[0;34m',
+    'blue-bold': '\033[1;34m',
+    'endc': '\033[0m'
+}
+
+
+def print_msg(msg, color='blue', verb=3):
+    if verb <= CONFIG['verb']:
+        if color not in COLORS:
+            color = 'blue'
+        print "%s%s%s" % (COLORS[color], msg, COLORS['endc'])
 
 
 def unsort_list(lst):
@@ -136,6 +156,16 @@ def trace_route(target_ip, dest_port):
 
 def parse_args():
     global CONFIG
+    print '''
+'########'########::::'###::::'######:'########'##::: ##'########'########:
+... ##..::##.... ##::'## ##::'##... ##:##.....::###:: ##:##.....:... ##..::
+::: ##::::##:::: ##:'##:. ##::##:::..::##:::::::####: ##:##::::::::: ##::::
+::: ##::::########:'##:::. ##:##:::::::######:::## ## ##:######::::: ##::::
+::: ##::::##.. ##:::#########:##:::::::##...::::##. ####:##...:::::: ##::::
+::: ##::::##::. ##::##.... ##:##::: ##:##:::::::##:. ###:##::::::::: ##::::
+::: ##::::##:::. ##:##:::: ##. ######::########:##::. ##:########::: ##::::
+:::..::::..:::::..:..:::::..::......::........:..::::..:........::::..:::::
+'''
     parser = argparse.ArgumentParser(
         description='A tool for network range discovery using traceroute.',
         epilog='Author: Alguien (@alguien_tw) | alguien.site')
@@ -147,7 +177,7 @@ def parse_args():
     parser.add_argument('--max-ttl', type=int, help='Maximum TTL for traceroute')
     parser.add_argument('--deep', type=int, help='Maximum deep for finding a common hop')
     parser.add_argument('--no-scan', action='store_true', default=False, help='Don\'t perform portscan')
-    parser.add_argument('--verb', type=int, help='Verbose level [0-3]')
+    parser.add_argument('--verb', type=int, help='Verbose level [1-3]')
     args = parser.parse_args()
 
     # update global config
@@ -171,9 +201,11 @@ def parse_args():
 
 
 def print_route(dest, path):
-    print "[*] Route to %s:" % (dest['ip'])
+    msg = "[*] Route to %s:" % (dest['ip'])
+    print_msg(msg, 'blue', 3)
     for hop in path:
-        print "\t%3d: %s" % (hop['ttl'], hop['ip'])
+        msg = "\t%3d: %s" % (hop['ttl'], hop['ip'])
+        print_msg(msg, 'blue', 3)
 
 
 def search_hosts(net, mask):
@@ -182,21 +214,29 @@ def search_hosts(net, mask):
     subnets = div_net(net, mask, 26)
     subnets = unsort_list(subnets)
     if scan:
-        print "[*] Scanning network %s/%d..." % (net, mask)
+        msg = "[*] Scanning network %s/%d..." % (net, mask)
+        print_msg(msg, 'blue', 2)
         for port in TOP_PORTS:
-            print "\t> Trying with port %d..." % (port)
+            msg = "\t> Trying with port %d..." % (port)
+            print_msg(msg, 'blue', 3)
             for sub in subnets:
                 hosts = port_scan('%s/%d' % (sub['ip'], sub['mask']), port)
                 if len(hosts) > 0:
                     return hosts
     host = {'ip': random_ip(net, mask), 'port': 80}
     hosts.append(host)
-    print "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
+    msg = "[*] Using a random IP (%s:%d)" % (host['ip'], host['port'])
+    print_msg(msg, 'blue', 2)
     return hosts
 
 
 def main():
     parse_args()
+
+    if os.getuid() != 0:
+        msg = "[-] Error. Root privileges is required."
+        print_msg(msg, 'red-bold', 1)
+        exit(-1)
 
     mask = CONFIG['mask']
     max_mask = CONFIG['max_mask']
@@ -205,10 +245,12 @@ def main():
     net = to_net(target, mask)
     hosts = unsort_list(search_hosts(net, mask))
     dest1 = hosts[0]
-    print "[*] Host found: %s:%d" % (dest1['ip'], dest1['port'])
+    msg = "[*] Host found: %s:%d" % (dest1['ip'], dest1['port'])
+    print_msg(msg, 'green', 1)
     path1 = trace_route(dest1['ip'], dest1['port'])
     if len(path1) == 0:
-        print "[-] Error. I can't trace the route to %s" % (dest1['ip'])
+        msg = "[-] Error. I can't trace the route to %s" % (dest1['ip'])
+        print_msg(msg, 'red-bold', 1)
         exit(-1)
     print_route(dest1, path1)
 
@@ -216,25 +258,29 @@ def main():
         net2 = comp_subnet(net, mask)
         hosts = unsort_list(search_hosts(net2, mask))
         dest2 = hosts[0]
-        print "[*] Host found: %s:%d" % (dest2['ip'], dest2['port'])
+        msg = "[*] Host found: %s:%d" % (dest2['ip'], dest2['port'])
+        print_msg(msg, 'green', 1)
         path2 = trace_route(dest2['ip'], dest2['port'])
         if len(path2) == 0:
-            print "[-] Error. I can't trace the route to %s" % (dest2['ip'])
+            msg = "[-] Error. I can't trace the route to %s" % (dest2['ip'])
+            print_msg(msg, 'red-bold', 1)
             break
         print_route(dest2, path2)
 
         gateway = find_gateway(path1, path2)
         if gateway is None:
-            print "[*] There is not a common hop for %s and %s" % (dest1['ip'], dest2['ip'])
+            msg = "[*] There is not a common hop for %s and %s" % (dest1['ip'], dest2['ip'])
+            print_msg(msg, 'red-bold', 1)
             break
 
-        print "[+] Common hop found: %s (ttl: %d)" % (
-            gateway['ip'], gateway['ttl'])
+        msg = "[+] Common hop found: %s (ttl: %d)" % (gateway['ip'], gateway['ttl'])
+        print_msg(msg, 'green-bold', 1)
 
         mask -= 1
         net = to_net(net, mask)
 
-    print "[+] Network range: %s/%d" % (net, mask)
+    msg = "[+] Network range: %s/%d" % (net, mask)
+    print_msg(msg, 'green-bold', 1)
 
 
 if __name__ == '__main__':

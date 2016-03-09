@@ -244,40 +244,60 @@ def main():
 
     net = to_net(target, mask)
     hosts = unsort_list(search_hosts(net, mask))
-    dest1 = hosts[0]
-    msg = "[*] Host found: %s:%d" % (dest1['ip'], dest1['port'])
+    dest = hosts.pop()
+
+    msg = "[*] Host found: %s:%d" % (dest['ip'], dest['port'])
     print_msg(msg, 'green', 1)
-    path1 = trace_route(dest1['ip'], dest1['port'])
-    if len(path1) == 0:
-        msg = "[-] Error. I can't trace the route to %s" % (dest1['ip'])
+
+    paths = []
+
+    path = trace_route(dest['ip'], dest['port'])
+    if len(path) == 0:
+        msg = "[-] Error. I can't trace the route to %s" % (dest['ip'])
         print_msg(msg, 'red-bold', 1)
         exit(-1)
-    print_route(dest1, path1)
+
+    print_route(dest, path)
+
+    paths.append({'dest': dest, 'path': path})
 
     while mask > max_mask:
-        net2 = comp_subnet(net, mask)
-        hosts = unsort_list(search_hosts(net2, mask))
-        dest2 = hosts[0]
-        msg = "[*] Host found: %s:%d" % (dest2['ip'], dest2['port'])
+        hosts = unsort_list(search_hosts(comp_subnet(net, mask), mask))
+        dest = hosts.pop()
+
+        msg = "[*] Host found: %s:%d" % (dest['ip'], dest['port'])
         print_msg(msg, 'green', 1)
-        path2 = trace_route(dest2['ip'], dest2['port'])
-        if len(path2) == 0:
-            msg = "[-] Error. I can't trace the route to %s" % (dest2['ip'])
+
+        path = trace_route(dest['ip'], dest['port'])
+        if len(path) == 0:
+            msg = "[-] Error. I can't trace the route to %s" % (dest['ip'])
             print_msg(msg, 'red-bold', 1)
             break
-        print_route(dest2, path2)
 
-        gateway = find_gateway(path1, path2)
+        print_route(dest, path)
+
+        for prev in paths:
+            gateway = find_gateway(prev['path'], path)
+            if gateway is None:
+                msg = "[*] There is not a common hop for %s and %s" % (prev['dest']['ip'], dest['ip'])
+                print_msg(msg, 'yellow', 2)
+            else:
+                msg = "[+] Common hop found between %s and %s: %s (ttl: %d)" % (prev['dest']['ip'], dest['ip'], gateway['ip'], gateway['ttl'])
+                print_msg(msg, 'green', 2)
+                break
+
         if gateway is None:
-            msg = "[*] There is not a common hop for %s and %s" % (dest1['ip'], dest2['ip'])
+            msg = "[*] Common hops not found"
             print_msg(msg, 'red-bold', 1)
             break
 
-        msg = "[+] Common hop found: %s (ttl: %d)" % (gateway['ip'], gateway['ttl'])
-        print_msg(msg, 'green-bold', 1)
+        paths.append({'dest': dest, 'path': path})
 
         mask -= 1
         net = to_net(net, mask)
+
+        msg = "[+] Current network range: %s/%d" % (net, mask)
+        print_msg(msg, 'green-bold', 1)
 
     msg = "[+] Network range: %s/%d" % (net, mask)
     print_msg(msg, 'green-bold', 1)

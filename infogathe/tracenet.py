@@ -24,6 +24,8 @@ CONFIG = {
     'mask': 29,
     'scan': True,
     'target': '0.0.0.0',
+    'graph': False,
+    'graph_file': None,
     'verb': 3
 }
 
@@ -38,6 +40,9 @@ COLORS = {
     'blue-bold': '\033[1;34m',
     'endc': '\033[0m'
 }
+
+
+traceroute_res = TracerouteResult()
 
 
 def print_msg(msg, color='blue', verb=3):
@@ -141,8 +146,10 @@ def port_scan(target_ip, dest_port):
 
 
 def trace_route(target_ip, dest_port):
+    global traceroute_res
     ans, _ = traceroute(target_ip, dport=dest_port, minttl=CONFIG['min_ttl'], maxttl=CONFIG['max_ttl'],
                         timeout=CONFIG['timeout'], verbose=False)
+    traceroute_res = traceroute_res.__add__(ans)
     path = []
     for (snd, rcv) in ans:
         path.append({'ttl': snd.ttl, 'ip': rcv.src})
@@ -177,6 +184,8 @@ def parse_args():
     parser.add_argument('--max-ttl', type=int, help='Maximum TTL for traceroute')
     parser.add_argument('--deep', type=int, help='Maximum deep for finding a common hop')
     parser.add_argument('--no-scan', action='store_true', default=False, help='Don\'t perform portscan')
+    parser.add_argument('--graph', action='store_true', default=False, help='Display graphically.')
+    parser.add_argument('--graph-file', type=str, help='Save the graph to file (SVG format)')
     parser.add_argument('--verb', type=int, help='Verbose level [1-3]')
     args = parser.parse_args()
 
@@ -195,6 +204,10 @@ def parse_args():
         CONFIG['mask'] = args.mask
     if args.no_scan:
         CONFIG['scan'] = False
+    if args.graph:
+        CONFIG['graph'] = True
+        if args.graph_file is not None:
+            CONFIG['graph_file'] = args.graph_file
     if args.verb is not None:
         CONFIG['verb'] = args.verb
     CONFIG['target'] = args.ip
@@ -301,6 +314,18 @@ def main():
 
     msg = "[+] Network range: %s/%d" % (net, mask)
     print_msg(msg, 'green-bold', 1)
+
+    if CONFIG['graph']:
+        if CONFIG['graph_file'] is not None:
+            msg = "[+] Saving the graph to \"%s\", please wait." % CONFIG['graph_file']
+            print_msg(msg, 'green', 2)
+            traceroute_res.graph(target="> %s" % CONFIG['graph_file'])  # TODO: Fix it ;)
+        else:
+            msg = "[+] Drawing the graph, please wait."
+            print_msg(msg, 'green', 2)
+            traceroute_res.graph()
+
+    print_msg("[+] Done.", 'green-bold', 1)
 
 
 if __name__ == '__main__':

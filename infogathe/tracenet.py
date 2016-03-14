@@ -10,6 +10,7 @@ import socket
 import struct
 import argparse
 import os
+from ipwhois import IPWhois
 
 # Top 10 TCP ports from nmap-services
 TOP_PORTS = [80, 23, 443, 21, 22, 25, 3389, 110, 445, 139]
@@ -26,6 +27,7 @@ CONFIG = {
     'target': '0.0.0.0',
     'graph': False,
     'graph_file': None,
+    'whois': True,
     'verb': 3
 }
 
@@ -41,8 +43,17 @@ COLORS = {
     'endc': '\033[0m'
 }
 
-
 traceroute_res = TracerouteResult()
+
+
+def get_cidrs_via_whois(ipaddr):
+    res = IPWhois(ipaddr).lookup()
+    cidrs = None
+    if 'nets' in res and type(res['nets']) is list:
+        cidrs = [net['cidr'] for net in res['nets'] if 'cidr' in net]
+    if cidrs is not None and len(cidrs) > 0:
+        return cidrs[0]
+    return None
 
 
 def print_msg(msg, color='blue', verb=3):
@@ -89,42 +100,63 @@ def div_net(net, mask, limit):
         return [{'ip': net, 'mask': mask}]
 
 
-def find_gateway(path1, path2):
+def find_gateway(trace1, trace2):
     max_deep = CONFIG['max_deep']
-    if len(path1) < 2 or len(path2) < 2:
+    if len(trace1['path']) < 1 or len(trace2['path']) < 1:
         return None
-    gws = []
-    dst1 = path1[-1]
-    dst2 = path2[-1]
-    idx1 = len(path1) - 2
+
+    compl1 = trace1['dest']['ip'] == trace1['path'][-1]['ip']
+    compl2 = trace2['dest']['ip'] == trace2['path'][-1]['ip']
+
+    if not (compl1 or compl2):
+        return None
+
+    gateways = []
+
+    dest1 = trace1['path'][-1]
+    dest2 = trace2['path'][-1]
+    if not compl1:
+        dest1 = dest2
+    if not compl2:
+        dest2 = dest1
+
+    idx1 = len(trace1['path']) - 1
+    if compl1:
+        idx1 -= 1
     while idx1 >= 0:
-        hop1 = path1[idx1]
-        if dst1['ttl'] - hop1['ttl'] > max_deep:
+        hop1 = trace1['path'][idx1]
+        if dest1['ttl'] - hop1['ttl'] > max_deep:
             break
-        idx2 = len(path2) - 2
+
+        idx2 = len(trace2['path']) - 1
+        if compl2:
+            idx2 -= 1
         while idx2 >= 0:
-            hop2 = path2[idx2]
-            if dst2['ttl'] - hop2['ttl'] > max_deep:
+            hop2 = trace2['path'][idx2]
+            if dest2['ttl'] - hop2['ttl'] > max_deep:
                 break
             if hop1['ip'] == hop2['ip']:
-                gws.append({'path1': hop1, 'path2': hop2})
+                gateways.append({'path1': hop1, 'path2': hop2})
             idx2 -= 1
+
         idx1 -= 1
-    if len(gws) == 0:
+
+    if len(gateways) == 0:
         return None
-    major = gws[0]
+
+    major = gateways[0]
     major_val = (
-        (dst1['ttl'] - major['path1']['ttl']) +
-        (dst2['ttl'] - major['path2']['ttl']) +
+        (dest1['ttl'] - major['path1']['ttl']) +
+        (dest2['ttl'] - major['path2']['ttl']) +
         abs(major['path1']['ttl'] - major['path2']['ttl']))
-    for idx in range(1, len(gws)):
-        gw = gws[idx]
+    for idx in range(1, len(gateways)):
+        gateway = gateways[idx]
         val = (
-            (dst1['ttl'] - gw['path1']['ttl']) +
-            (dst2['ttl'] - gw['path2']['ttl']) +
-            abs(gw['path1']['ttl'] - gw['path2']['ttl']))
+            (dest1['ttl'] - gateway['path1']['ttl']) +
+            (dest2['ttl'] - gateway['path2']['ttl']) +
+            abs(gateway['path1']['ttl'] - gateway['path2']['ttl']))
         if val < major_val:
-            major = gw
+            major = gateway
             major_val = val
     if major['path1']['ttl'] == major['path2']['ttl']:
         major = major['path1']
@@ -149,7 +181,7 @@ def trace_route(target_ip, dest_port):
     global traceroute_res
     ans, _ = traceroute(target_ip, dport=dest_port, minttl=CONFIG['min_ttl'], maxttl=CONFIG['max_ttl'],
                         timeout=CONFIG['timeout'], verbose=False)
-    traceroute_res = traceroute_res.__add__(ans)
+    traceroute_res = traceroute_res + ans
     path = []
     for (snd, rcv) in ans:
         path.append({'ttl': snd.ttl, 'ip': rcv.src})
@@ -184,6 +216,8 @@ def parse_args():
     parser.add_argument('--max-ttl', type=int, help='Maximum TTL for traceroute')
     parser.add_argument('--deep', type=int, help='Maximum deep for finding a common hop')
     parser.add_argument('--no-scan', action='store_true', default=False, help='Don\'t perform portscan')
+    parser.add_argument('--no-whois', action='store_true', default=False,
+                        help='Don\'t use whois to set the netmask limit')
     parser.add_argument('--graph', action='store_true', default=False, help='Display graphically.')
     parser.add_argument('--graph-file', type=str, help='Save the graph to file (SVG format)')
     parser.add_argument('--verb', type=int, help='Verbose level [1-3]')
@@ -192,6 +226,9 @@ def parse_args():
     # update global config
     if args.max_mask is not None:
         CONFIG['max_mask'] = args.max_mask
+        CONFIG['whois'] = False
+    elif args.no_whois:
+        CONFIG['whois'] = False
     if args.timeout is not None:
         CONFIG['timeout'] = args.timeout
     if args.min_ttl is not None:
@@ -206,8 +243,9 @@ def parse_args():
         CONFIG['scan'] = False
     if args.graph:
         CONFIG['graph'] = True
-        if args.graph_file is not None:
-            CONFIG['graph_file'] = args.graph_file
+    if args.graph_file is not None:
+        CONFIG['graph'] = True
+        CONFIG['graph_file'] = args.graph_file
     if args.verb is not None:
         CONFIG['verb'] = args.verb
     CONFIG['target'] = args.ip
@@ -252,8 +290,17 @@ def main():
         exit(-1)
 
     mask = CONFIG['mask']
-    max_mask = CONFIG['max_mask']
     target = CONFIG['target']
+
+    max_mask = CONFIG['max_mask']
+    if CONFIG['whois']:
+        cidr = get_cidrs_via_whois(target)
+        if cidr is not None:
+            msg = "[*] CIDR obtained via whois: %s" % (cidr)
+            print_msg(msg, 'green', 2)
+            max_mask = int(cidr.split('/').pop())
+            msg = "[*] Netmask limit set to: %s" % (max_mask)
+            print_msg(msg, 'green', 2)
 
     net = to_net(target, mask)
     hosts = unsort_list(search_hosts(net, mask))
@@ -262,7 +309,7 @@ def main():
     msg = "[*] Host found: %s:%d" % (dest['ip'], dest['port'])
     print_msg(msg, 'green', 1)
 
-    paths = []
+    traces = []
 
     path = trace_route(dest['ip'], dest['port'])
     if len(path) == 0:
@@ -272,7 +319,8 @@ def main():
 
     print_route(dest, path)
 
-    paths.append({'dest': dest, 'path': path})
+    traces.append({'dest': dest, 'path': path})
+    prev_gateway = None
 
     while mask > max_mask:
         hosts = unsort_list(search_hosts(comp_subnet(net, mask), mask))
@@ -289,13 +337,14 @@ def main():
 
         print_route(dest, path)
 
-        for prev in paths:
-            gateway = find_gateway(prev['path'], path)
+        for trace in traces:
+            gateway = find_gateway(trace, {'dest': dest, 'path': path})
             if gateway is None:
-                msg = "[*] There is not a common hop for %s and %s" % (prev['dest']['ip'], dest['ip'])
+                msg = "[*] There is not a common hop for %s and %s" % (trace['dest']['ip'], dest['ip'])
                 print_msg(msg, 'yellow', 2)
             else:
-                msg = "[+] Common hop found between %s and %s: %s (ttl: %d)" % (prev['dest']['ip'], dest['ip'], gateway['ip'], gateway['ttl'])
+                msg = "[+] Common hop found between %s and %s: %s (ttl: %d)" % (
+                    trace['dest']['ip'], dest['ip'], gateway['ip'], gateway['ttl'])
                 print_msg(msg, 'green', 2)
                 break
 
@@ -304,8 +353,19 @@ def main():
             print_msg(msg, 'red-bold', 1)
             break
 
-        paths.append({'dest': dest, 'path': path})
+        if prev_gateway is not None:
+            if prev_gateway['ip'] != gateway['ip']:
+                msg = "[*] WARNING: The gateway address has changed. OLD: %s / NEW: %s" % (
+                    prev_gateway['ip'], gateway['ip'])
+                print_msg(msg, 'yellow', 2)
+            if gateway['ttl'] < prev_gateway['ttl']:
+                msg = "[*] WARNING: The gateway TTL has reduced. OLD: %d / NEW: ttl: %d" % (
+                    prev_gateway['ttl'], gateway['ttl'])
+                print_msg(msg, 'yellow', 2)
 
+        traces.append({'dest': dest, 'path': path})
+
+        prev_gateway = gateway
         mask -= 1
         net = to_net(net, mask)
 

@@ -62,14 +62,35 @@ class NameSearcher(object):
         return names
 
 
+class IPSearcher(object):
+    def __init__(self, ipaddr, dorker=None):
+        self.ipaddr = ipaddr
+        self.dorker = dorker if dorker is not None else BingDorker()
+
+    def search_names(self, npages=10):
+        names = []
+        dork = 'ip:{}'.format(self.ipaddr)
+        for npage in xrange(npages):
+            urls = self.dorker.search(dork, npage * 50 + 1, 50)
+            if urls is None:
+                return names
+            for url in urls:
+                name = urlparse(url).hostname
+                if name is not None and name not in names:
+                    print "[+] {}".format(name)
+                    names.append(name)
+        return names
+
+
 def main():
     parser = argparse.ArgumentParser(description='Search Subdomains.')
-    parser.add_argument('domain', metavar='DOMAIN', type=str, help='The domain name. E.g.: example.com')
+    parser.add_argument('domain', metavar='DOMAIN|IPADDR', type=str, help='The domain name. E.g.: example.com')
+    parser.add_argument('-r', '--reverse', action='store_true', help='Bing reverse domain resolution.')
     parser.add_argument('-a', '--agent', metavar='AGENT', type=str, help='User-Agent string. E.g.: Mozilla/5.0')
     args = parser.parse_args()
 
     dorker = BingDorker(agent=args.agent)
-    searcher = NameSearcher(args.domain, dorker=dorker)
+    searcher = IPSearcher(args.domain, dorker=dorker) if args.reverse else NameSearcher(args.domain, dorker=dorker)
     names = searcher.search_names()
 
     print '[+] Total found: {}'.format(len(names))

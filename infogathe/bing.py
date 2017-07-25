@@ -32,7 +32,7 @@ class BingDorker(object):
             print 'error:', err
             return None
         html_parser = HTMLParser()
-        return [html_parser.unescape(link) for link in self.link_pattern.findall(html)]
+        return [html_parser.unescape(link.decode('utf8')) for link in self.link_pattern.findall(html)]
 
 class NameSearcher(object):
     def __init__(self, basename, dorker=None):
